@@ -14,7 +14,7 @@ from rlm.core.types import (
     RLMMetadata,
 )
 from rlm.environments import BaseEnv, get_environment
-from rlm.logger.rlm_logger import RLMLogger
+from rlm.logger import RLMLogger, VerbosePrinter
 from rlm.utils.parsing import (
     find_code_blocks,
     find_final_answer,
@@ -50,6 +50,7 @@ class RLM:
         other_backends: list[ClientBackend] | None = None,
         other_backend_kwargs: list[dict[str, Any]] | None = None,
         logger: RLMLogger | None = None,
+        verbose: bool = False,
     ):
         """
         Args:
@@ -58,12 +59,13 @@ class RLM:
             environment: The environment to use for the RLM.
             environment_kwargs: The kwargs to pass to the environment.
             depth: The current depth of the RLM (0-indexed).
-            max_depth: The maximum depth of the RLM.
+            max_depth: The maximum depth of the RLM. Currently, only depth 1 is supported.
             max_iterations: The maximum number of iterations of the RLM.
             custom_system_prompt: The custom system prompt to use for the RLM.
             other_backends: A list of other client backends that the environments can use to make sub-calls.
             other_backend_kwargs: The kwargs to pass to the other client backends (ordered to match other_backends).
             logger: The logger to use for the RLM.
+            verbose: Whether to print verbose output in rich to console.
         """
         # Store config for spawning per-completion
         self.backend = backend
@@ -78,9 +80,10 @@ class RLM:
         self.max_iterations = max_iterations
         self.system_prompt = custom_system_prompt if custom_system_prompt else RLM_SYSTEM_PROMPT
         self.logger = logger
+        self.verbose = VerbosePrinter(enabled=verbose)
 
         # Log metadata if logger is provided
-        if self.logger:
+        if self.logger or verbose:
             metadata = RLMMetadata(
                 root_model=backend_kwargs.get("model_name", "unknown"),
                 max_depth=max_depth,
@@ -91,7 +94,9 @@ class RLM:
                 environment_kwargs=filter_sensitive_keys(environment_kwargs),
                 other_backends=other_backends,
             )
-            self.logger.log_metadata(metadata)
+            if self.logger:
+                self.logger.log_metadata(metadata)
+            self.verbose.print_metadata(metadata)
 
     @contextmanager
     def _spawn_completion_context(self, prompt: str | dict[str, Any]):
@@ -156,6 +161,11 @@ class RLM:
             A final answer as a string.
         """
         time_start = time.perf_counter()
+
+        # If we're at max depth, the RLM is an LM, so we fallback to the regular LM.
+        if self.depth >= self.max_depth:
+            return self._fallback_answer(prompt)
+
         with self._spawn_completion_context(prompt) as (lm_handler, environment):
             message_history = self._setup_prompt(prompt)
 
@@ -177,13 +187,19 @@ class RLM:
                 if self.logger:
                     self.logger.log(iteration)
 
+                # Verbose output for this iteration
+                self.verbose.print_iteration(iteration, i + 1)
+
                 if final_answer:
                     time_end = time.perf_counter()
+                    usage = lm_handler.get_usage_summary()
+                    self.verbose.print_final_answer(final_answer)
+                    self.verbose.print_summary(i + 1, time_end - time_start, usage.to_dict())
                     return RLMChatCompletion(
                         root_model=self.backend_kwargs.get("model_name", "unknown"),
                         prompt=prompt,
                         response=final_answer,
-                        usage_summary=lm_handler.get_usage_summary(),
+                        usage_summary=usage,
                         execution_time=time_end - time_start,
                     )
 
@@ -194,8 +210,18 @@ class RLM:
                 message_history.extend(new_messages)
 
             # Default behavior: we run out of iterations, provide one final answer
+            time_end = time.perf_counter()
             final_answer = self._default_answer(message_history, lm_handler)
-            return final_answer
+            usage = lm_handler.get_usage_summary()
+            self.verbose.print_final_answer(final_answer)
+            self.verbose.print_summary(self.max_iterations, time_end - time_start, usage.to_dict())
+            return RLMChatCompletion(
+                root_model=self.backend_kwargs.get("model_name", "unknown"),
+                prompt=prompt,
+                response=final_answer,
+                usage_summary=usage,
+                execution_time=time_end - time_start,
+            )
 
     def _completion_turn(
         self,
@@ -247,4 +273,12 @@ class RLM:
                 )
             )
 
+        return response
+
+    def _fallback_answer(self, message: str | dict[str, Any]) -> str:
+        """
+        Fallback behavior if the RLM is actually at max depth, and should be treated as an LM.
+        """
+        client: BaseLM = get_client(self.backend, self.backend_kwargs)
+        response = client.completion(message)
         return response

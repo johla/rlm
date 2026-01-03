@@ -4,7 +4,8 @@ from typing import Any
 from portkey_ai import Portkey
 from portkey_ai.api_resources.types.chat_complete_type import ChatCompletions
 
-from rlm.clients.base_lm import BaseLM, ModelUsageSummary, UsageSummary
+from rlm.clients.base_lm import BaseLM
+from rlm.core.types import ModelUsageSummary, UsageSummary
 
 
 class PortkeyClient(BaseLM):

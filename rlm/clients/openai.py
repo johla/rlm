@@ -5,7 +5,8 @@ from typing import Any
 import openai
 from dotenv import load_dotenv
 
-from rlm.clients.base_lm import BaseLM, ModelUsageSummary, UsageSummary
+from rlm.clients.base_lm import BaseLM
+from rlm.core.types import ModelUsageSummary, UsageSummary
 
 load_dotenv()
 

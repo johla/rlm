@@ -5,21 +5,24 @@ from rlm.environments.local_repl import LocalREPL
 
 
 def get_environment(
-    environment: Literal["local", "modal"],
+    environment: Literal["local", "modal", "docker"],
     environment_kwargs: dict[str, Any],
 ) -> BaseEnv:
     """
     Routes a specific environment and the args (as a dict) to the appropriate environment if supported.
-    Currently supported environments: ['local', 'modal']
+    Currently supported environments: ['local', 'modal', 'docker']
     """
     if environment == "local":
         return LocalREPL(**environment_kwargs)
     elif environment == "modal":
-        # Lazy import to avoid requiring modal as a hard dependency
         from rlm.environments.modal_repl import ModalREPL
 
         return ModalREPL(**environment_kwargs)
+    elif environment == "docker":
+        from rlm.environments.docker_repl import DockerREPL
+
+        return DockerREPL(**environment_kwargs)
     else:
         raise ValueError(
-            f"Unknown environment: {environment}. Supported environments: ['local', 'modal']"
+            f"Unknown environment: {environment}. Supported: ['local', 'modal', 'docker']"
         )

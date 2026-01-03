@@ -18,6 +18,7 @@ rlm = RLM(
     environment_kwargs={},
     max_depth=1,
     logger=logger,
+    verbose=True,
 )
 
 result = rlm.completion("Using your code, solve 2^(2^(2^(2))). Show your work in Python.")
